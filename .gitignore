@@ -1,3 +1,12 @@
+# Secret files
+vk_info.py
+
+# Vim files
+*.swp
+
+# macOS system files
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
