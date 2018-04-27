@@ -114,7 +114,7 @@ def reply_to_message(user, message):
 			return True
 
 	if group is not None and query is not None:
-		add_query(query, group)
+		add_query(user, query, group)
 		send_message(user, text_added.format(q = query, g = group))
 		return True
 	elif group is not None and query is None:
@@ -180,7 +180,7 @@ def add_user(u):
 	db = get_file_data(db_file)
 	# User ID is a number — convert it to string
 	u = str(u)
-	if str(u) not in db:
+	if u not in db:
 		print("Adding a user...")
 		db[u] = {}
 		set_file_data(db_file, db)
@@ -188,18 +188,21 @@ def add_user(u):
 # Adds a query and a group to the query of a specified user
 def add_query(u, q = None, g = None):
 	print("Adding a query...")
-	try:
-		db = get_file_data(db_file)
-		if u not in db:
-			db[u] = {}
-		if q is not None and q not in db[u]:
-			db[u][q] = []
-		if g is not None and g not in db[u][q]:
-			db[u][q][g] = ""
-		set_file_data(db_file, db)
-	except Exception as e:
-		print("Adding a query failed: ", e)
-		pass
+	db = get_file_data(db_file)
+
+	if u not in db:
+		print("User is not in the db")
+		add_user(u)
+		
+	if q is not None and q not in db[u]:
+		print("q is not None and q not in db[u]")
+		db[u][q] = {}
+
+	if g is not None and g not in db[u][q]:
+		print("g is not None and g not in db[u][q]")
+		db[u][q][g] = ""
+
+	set_file_data(db_file, db)
 
 # Removes query and group from the list of the specified user
 def remove_query(u, q = None, g = None):
