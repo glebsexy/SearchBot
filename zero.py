@@ -1,3 +1,12 @@
+""" VK Search Bot
+
+This bot searches for new posts on specified queries. Each user could have their own list of searches. Users could add and remove queries by talking to the bot.
+
+TODO:
+	* Russian and English translation
+	* Make the bot remember the context
+	
+"""
 import time
 import vk
 from lxml import html
@@ -8,8 +17,13 @@ from vk_info import token, version
 
 lm_file, db_file = "lm.json", "db.json"
 
-# q — query, g — group
-# Texts used to talk to the user
+"""
+Texts used to talk to the user
+
+Args:
+	q: query
+	g: group
+"""
 text_hello = "Привет!"
 text_unclear = "Я не понимаю тебя. :c"
 text_help = "Доступные команды:\n- Добавь <поисковый запрос> [в группе <URL группы>]\n- Удали <поискавый запрос> [для группы <URL группы>]\n- Отписаться (от всех поисков; можно заново \"подписаться\")"
@@ -21,7 +35,7 @@ text_ask_group = "В какой группе искать? Скинь ссылк
 text_removed = "Больше не буду оповещать о новых записях с \"{q}\" в сообществе \"{g}\"."
 
 """  
-# Data structure: 
+Data structure:
 
 { 
 	user : { 
@@ -55,8 +69,8 @@ def main():
 		time.sleep(3)
 
 
-# Gets messages after the last one
 def get_messages():
+""" Gets messages after the last one """
 	last_message = get_file_data(lm_file)
 	if not last_message:
 		values = {'access_token': token, 'v': version, 'out': 0, 'count': 100, 'time_offset': 0}
@@ -72,13 +86,13 @@ def get_messages():
 	except KeyError as e:
 		print("KeyError: ", e)
 		print("Received data: ", q)
-		return
+		return []
 	except requests.exceptions.RequestException as e:
 		print("Get messages request error: ", e)
-		return
+		return []
 
-# Filter only new messages out
 def filter_new_messages(messages):
+""" Filter only new messages out """
 	last_message = get_file_data(lm_file)
 	if not last_message:
 		print("Filtering, last message is None.")
@@ -91,10 +105,15 @@ def filter_new_messages(messages):
 	return new_messages
 
 
-# Given a message, find the best answer to it and act upon it
 def reply_to_message(user, message):
+""" Given a message, find the best answer to it and act upon it
+
+Returns:
+	True if the reply was enough, False if it's necessary to wait for a user to reply. 
+"""
 	user = str(user)
 	add_user(user)
+	print("Choosing the reply...")
 	query, group = extract_query(message)
 	if "Удали" in message or "удали" in message:
 		remove_query(user, query, group)
@@ -136,11 +155,12 @@ def reply_to_message(user, message):
 	if "одписаться" in message:
 		send_message(user, text_subscribed)
 		return True
+	# None of the filters matched
 	send_message(user, text_unclear)
 	return True
 
-# Sends the text message to the user
 def send_message(user, text):
+""" Sends the text message to the user """
 	values = {'access_token': token, 'v': version, 'peer_id': user, 'message': text}
 	try:
 		requests.get('https://api.vk.com/method/messages.send', params = values)
@@ -148,8 +168,8 @@ def send_message(user, text):
 		print("Send message request exception: ", e)
 		return
 
-# Sends a VK wall post to the user TODO
 def send_post(user, post):
+""" Sends a VK wall post to the user TODO """
 	values = {'access_token': token, 'v': version, 'peer_id': user, 'message': text}
 	try:
 		requests.get('https://api.vk.com/method/messages.send', params = values)
@@ -158,8 +178,8 @@ def send_post(user, post):
 		return
 	
 
-# Tries to understand a query and/or group from the user's message
 def extract_query(m):
+""" Tries to understand a query and/or group from the user's message """
 	q, g = None, None
 	try:
 		words = m.split(" ")
@@ -175,8 +195,8 @@ def extract_query(m):
 		pass
 	return q, g
 
-# Adds a user to the database
 def add_user(u):
+""" Adds a user to the database """
 	db = get_file_data(db_file)
 	# User ID is a number — convert it to string
 	u = str(u)
@@ -185,8 +205,8 @@ def add_user(u):
 		db[u] = {}
 		set_file_data(db_file, db)
 
-# Adds a query and a group to the query of a specified user
 def add_query(u, q = None, g = None):
+""" Adds a query and a group to the query of a specified user """
 	print("Adding a query...")
 	db = get_file_data(db_file)
 
@@ -204,8 +224,8 @@ def add_query(u, q = None, g = None):
 
 	set_file_data(db_file, db)
 
-# Removes query and group from the list of the specified user
 def remove_query(u, q = None, g = None):
+""" Removes query and group from the list of the specified user """
 	try:
 		db = get_file_data(db_file)
 		if u not in db:
@@ -227,8 +247,8 @@ def remove_query(u, q = None, g = None):
 		print("Removing a query failed: ", e)
 		pass
 
-# Get last message from the array of messages
 def get_last_message(messages):
+""" Get last message from the array of messages """
 	lm = messages[0]
 	for message in messages:
 		if message['date'] > lm['date']:
@@ -236,20 +256,20 @@ def get_last_message(messages):
 			lm = message
 	return lm
 	
-# Get JSON data from file
 def get_file_data(file_address):
+""" Get JSON data from file """
 	with open(file_address, 'r', encoding='utf-8') as f:
 		return json.load(f)
 
-# Set file to JSON data
 def set_file_data(file_address, data):
+""" Set file to JSON data """
 	with open(file_address, 'w', encoding='utf-8') as f:
 		f.seek(0)
 		json.dump(data, f, indent = 4, ensure_ascii = False)
 		f.truncate()
 
-# Search the page for posts matching the query
 def search(page, query):
+""" Search the page for posts matching the query """
 	page = requests.get("https://m.vk.com/{}?q={}".format(page, query))
 	tree = html.fromstring(page.content)
 	
