@@ -1,6 +1,9 @@
 # Secret files
 vk_info.py
 
+# Unnecessary files
+bot.log*
+
 # Vim files
 *.swp
 

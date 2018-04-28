@@ -45,6 +45,7 @@ text_added = "Буду оповещать, если новые результа�
 text_wrong_data = "Что-то это не то."
 text_ask_group = "В какой группе искать? Скинь ссылку, пожалуйста."
 text_removed = "Больше не буду оповещать о новых записях с \"{q}\" в сообществе \"{g}\"."
+text_cant_find_group = "Не могу найти группу с таким адресом. о_О"
 
 """  
 Data structure:
@@ -131,11 +132,21 @@ def reply_to_message(user, message):
 	"""
 	user = str(user)
 	add_user(user)
-	query, owner_id = extract_query(message)
+	owner_id = None
+	query, screen_name = extract_query(message)
+	if screen_name is not None:
+		group = get_group_info(screen_name)
+		if group:
+			owner_id = -group['id']
+			group_name = group['name']
+		else:
+			send_message(user, text_cant_find_group)
+			return True
+	
 	if "Удали" in message or "удали" in message:
 		remove_query(user, query, owner_id)
 		if owner_id is not None and query is not None:
-			send_message(user, text_removed.format(q = query, g = owner_id))
+			send_message(user, text_removed.format(q = query, g = group_name))
 			return True
 		elif owner_id is not None and query is None:
 			send_message(user, text_removed_group)
@@ -151,7 +162,7 @@ def reply_to_message(user, message):
 
 	if owner_id is not None and query is not None:
 		add_query(user, query, owner_id)
-		send_message(user, text_added.format(q = query, g = owner_id))
+		send_message(user, text_added.format(q = query, g = group_name))
 		return True
 	elif owner_id is not None and query is None:
 		send_message(user, text_ask_query)
@@ -229,15 +240,15 @@ def add_query(u, q = None, g = None):
 	db = get_file_data(DB_FILE)
 
 	if u not in db:
-		blogger.debug("User is not yet in the DB, adding.")
+		blogger.debug("Adding a user to DB.")
 		add_user(u)
 		db = get_file_data(DB_FILE)
 	if q is not None and q not in db[u]:
-		blogger.debug("Query is provided and is not yet in DB, adding.")
+		blogger.debug("Adding a query to DB.")
 		db[u][q] = {}
 
 	if g is not None and g not in db[u][q]:
-		blogger.debug("Owner ID is provided and owner ID doesn't belong to a query, adding.")
+		blogger.debug("Adding an owner ID to the query.")
 	
 		all_posts = search_posts(g, q)
 		posts, replies = separate_posts_and_replies(all_posts)
@@ -379,6 +390,22 @@ def update_last_post(user, query, owner_id, post_id):
 	db = get_file_data(DB_FILE)
 	db[user][query][owner_id] = post_id
 	set_file_data(DB_FILE, db)
+
+def get_group_info(screen_name):
+	""" Get name and ID of a group. """
+	values = {'access_token': token, 'v': version, 'group_ids': screen_name}
+	try:
+		r = requests.get('https://api.vk.com/method/groups.getById', params = values)
+		q = r.json()
+		group = q['response'][0]
+		return group
+	except KeyError as e:
+		blogger.error("KeyError: {}".format(e))
+		blogger.error("Received data: {}".format(q))
+		return []
+	except requests.exceptions.RequestException as e:
+		blogger.error("Get group by ID request error: {}".format(e))
+		return []
 
 def search(page, query):
 	""" Search the page for posts matching the query """
