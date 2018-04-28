@@ -8,14 +8,26 @@ TODO:
 	
 """
 import time
-import vk
 from lxml import html
 import requests
 import json
+import logging
+import logging.handlers
 
 from vk_info import token, version, service_token
 
-lm_file, db_file = "lm.json", "db.json"
+LOG_FILE = 'bot.log'
+LM_FILE, DB_FILE = "lm.json", "db.json"
+
+# Set up a specific logger with our desired output level
+blogger = logging.getLogger('BotLogger')
+blogger.setLevel(logging.DEBUG)
+
+# Add the log message handler to the logger
+handler = logging.handlers.RotatingFileHandler(LOG_FILE, maxBytes = 10 * 1024 * 1024, backupCount = 3)
+bf = logging.Formatter(fmt = '%(asctime)s %(levelname)s: %(message)s', datefmt='%Y.%m.%d %H:%M:%S', style='%')
+handler.setFormatter(bf)
+blogger.addHandler(handler)
 
 """
 Texts used to talk to the user
@@ -57,20 +69,20 @@ def main():
 		all_messages = get_messages()
 		messages = filter_new_messages(all_messages)
 		if not messages:
-			print("No new messages!")
+			blogger.debug("No new messages.")
 		else:
 			# They need to be reversed in order to be answered sequentially
 			for message in reversed(messages):
-				print("New messages found!")
-				print(messages)
+				blogger.debug("New messages found!")
 				reply_success = reply_to_message(message['user_id'], message['body'])
 				if not reply_success:
 					# TODO: save intent and wait for response
-					print("Reply was successful: ", reply_success)
+					blogger.debug("Reply was successful: {}".format(reply_success))
 				pass
-			set_file_data(lm_file, get_last_message(messages))
+			set_file_data(LM_FILE, get_last_message(messages))
 		
-		if counter % 1 != 0:
+		blogger.debug("Checked messages {} times.".format(counter))
+		if counter % 50 != 0:
 			time.sleep(3)
 			continue
 
@@ -81,36 +93,32 @@ def main():
 
 def get_messages():
 	""" Gets messages after the last one """
-	last_message = get_file_data(lm_file)
+	last_message = get_file_data(LM_FILE)
 	if not last_message:
 		values = {'access_token': token, 'v': version, 'out': 0, 'count': 100, 'time_offset': 0}
-		print("Getting messages, last message is None.")
 	else:	
 		values = {'access_token': token, 'v': version, 'out': 0, 'count': 200, 'last_message_id': last_message['id'], 'time_offset': 0}
-		print("Getting messages, last messages is ", last_message['id'])
 	try:
 		r = requests.get('https://api.vk.com/method/messages.get', params = values)
 		q = r.json()
 		messages = q['response']['items']
 		return messages
 	except KeyError as e:
-		print("KeyError: ", e)
-		print("Received data: ", q)
+		blogger.error("KeyError: {}".format(e))
+		blogger.error("Received data: {}".format(q))
 		return []
 	except requests.exceptions.RequestException as e:
-		print("Get messages request error: ", e)
+		blogger.error("Get messages request error: {}".format(e))
 		return []
 
 def filter_new_messages(messages):
 	""" Filter only new messages out """
-	last_message = get_file_data(lm_file)
+	last_message = get_file_data(LM_FILE)
 	if not last_message:
-		print("Filtering, last message is None.")
 		return messages
 	new_messages = []
 	for message in messages:
 		if message['date'] > last_message['date']:
-			print("Filtering: ", message['date'], " is larger than ", last_message['date'])
 			new_messages.append(message)
 	return new_messages
 
@@ -123,7 +131,6 @@ def reply_to_message(user, message):
 	"""
 	user = str(user)
 	add_user(user)
-	print("Choosing the reply...")
 	query, owner_id = extract_query(message)
 	if "Удали" in message or "удали" in message:
 		remove_query(user, query, owner_id)
@@ -175,7 +182,7 @@ def send_message(user, text):
 	try:
 		requests.get('https://api.vk.com/method/messages.send', params = values)
 	except requests.exception.RequestException as e:
-		print("Send message request exception: ", e)
+		blogger.error("Send message request exception: {}".format(e))
 		return
 
 def send_post(user, post):
@@ -185,7 +192,7 @@ def send_post(user, post):
 	try:
 		requests.get('https://api.vk.com/method/messages.send', params = values)
 	except requests.exception.RequestException as e:
-		print("Send post request exception: ", e)
+		blogger.error("Send post request exception: {}".format(e))
 		return
 	
 
@@ -202,47 +209,54 @@ def extract_query(m):
 		if "обавь" in words[0] or "дали" in words[0]:
 			q = words[1]
 	except Exception as e:
-		print("Query extraction failed: ", e)
+		blogger.warning("Query extraction failed: {}".format(e))
 		pass
 	return q, g
 
 def add_user(u):
 	""" Adds a user to the database """
-	db = get_file_data(db_file)
+	db = get_file_data(DB_FILE)
 	# User ID is a number — convert it to string
 	u = str(u)
 	if u not in db:
-		print("Adding a user...")
+		blogger.debug("Welcome new user! Adding...")
 		db[u] = {}
-		set_file_data(db_file, db)
+		set_file_data(DB_FILE, db)
 
 def add_query(u, q = None, g = None):
 	""" Adds a query and a owner_id to the query of a specified user """
-	print("Adding a query...")
-	db = get_file_data(db_file)
+	blogger.debug("Adding a query...")
+	db = get_file_data(DB_FILE)
 
 	if u not in db:
-		print("User is not in the db")
+		blogger.debug("User is not yet in the DB, adding.")
 		add_user(u)
-		db = get_file_data(db_file)
+		db = get_file_data(DB_FILE)
 	if q is not None and q not in db[u]:
-		print("q is not None and q not in db[u]")
+		blogger.debug("Query is provided and is not yet in DB, adding.")
 		db[u][q] = {}
 
 	if g is not None and g not in db[u][q]:
-		print("g is not None and g not in db[u][q]")
-		db[u][q][g] = ""
+		blogger.debug("Owner ID is provided and owner ID doesn't belong to a query, adding.")
+	
+		all_posts = search_posts(g, q)
+		posts, replies = separate_posts_and_replies(all_posts)
 
-	set_file_data(db_file, db)
+		if posts:
+			db[u][q][g] = posts[0]['id']
+		else:
+			db[u][q][g] = ""
+
+	set_file_data(DB_FILE, db)
 
 def remove_query(u, q = None, g = None):
 	""" Removes query and owner_id from the list of the specified user """
-	db = get_file_data(db_file)
+	db = get_file_data(DB_FILE)
 	if u not in db:
-		print("User not in DB tried to remove sth.")
+		blogger.debug("User not in DB tried to remove something.")
 		return
 	if q is None or q not in db[u]:
-		print("No query to remove.")
+		blogger.debug("No query to remove, trying to remove owner IDs.")
 		# Remove all appearences of a owner_id in all queries
 		if g is not None:
 			for query in db[u].keys():
@@ -251,14 +265,13 @@ def remove_query(u, q = None, g = None):
 	else:
 		db[u].pop(q, None)
 
-	set_file_data(db_file, db)
+	set_file_data(DB_FILE, db)
 
 def get_last_message(messages):
 	""" Get last message from the array of messages """
 	lm = messages[0]
 	for message in messages:
 		if message['date'] > lm['date']:
-			print(message['date'], " is larger than ", lm['date'])
 			lm = message
 	return lm
 	
@@ -287,16 +300,16 @@ def set_file_data(file_address, data):
 
 def search_all():
 	""" Search for all queries of all users """
-	db = get_file_data(db_file)
-	print("Searching...")
+	db = get_file_data(DB_FILE)
+	blogger.debug("Searching:")
 	for user in db:
 		for query in db[user]:
 			for owner_id in db[user][query]:
-				print("User: {}, query: {}, owner_id: {}".format(user, query, owner_id))
+				blogger.debug("User: {}, query: {}, owner_id: {}".format(user, query, owner_id))
 				all_posts = search_posts(owner_id, query)
 				posts, replies = separate_posts_and_replies(all_posts)
 				new_posts = filter_new_posts(user, query, owner_id, posts)
-				print("New posts: ", new_posts)
+				blogger.debug("Found {} new posts.".format(len(new_posts)))
 				if new_posts:
 					for post in new_posts:
 						send_post(user, post)
@@ -311,11 +324,11 @@ def search_posts(owner_id, query):
 		posts = q['response']['items']
 		return posts
 	except KeyError as e:
-		print("KeyError: ", e)
-		print("Received data: ", q)
+		blogger.error("KeyError: {}".format(e))
+		blogger.error("Received data: {}".format(q))
 		return []
 	except requests.exceptions.RequestException as e:
-		print("Search posts request error: ", e)
+		blogger.error("Search posts request error: {}".format(e))
 		return []
 
 def separate_posts_and_replies(items):
@@ -334,7 +347,7 @@ def filter_new_posts(user, query, owner_id, posts):
 	if not posts:
 		return []
 	# Get the post which is the last currently
-	db = get_file_data(db_file)
+	db = get_file_data(DB_FILE)
 	last_post = db[user][query][owner_id]
 	
 	# Last post is currently the latest, no new posts
@@ -346,7 +359,7 @@ def filter_new_posts(user, query, owner_id, posts):
 
 	# If a post wasn't listed, add it and return all posts as they are new
 	if last_post == "":
-		print("--- Last post wasn't present, adding.")
+		blogger.debug("--- Last post wasn't present, adding.")
 		update_last_post(user, query, owner_id, posts[0]['id'])
 		return posts
 
@@ -363,9 +376,9 @@ def filter_new_posts(user, query, owner_id, posts):
 
 def update_last_post(user, query, owner_id, post_id):
 	""" If new posts are found, the previous last post needs to be updated. """
-	db = get_file_data(db_file)
+	db = get_file_data(DB_FILE)
 	db[user][query][owner_id] = post_id
-	set_file_data(db_file, db)
+	set_file_data(DB_FILE, db)
 
 def search(page, query):
 	""" Search the page for posts matching the query """
@@ -377,7 +390,7 @@ def search(page, query):
 	for post in posts_raw:
 		posts_str.append("".join(post.xpath('descendant-or-self::text()')))
 	
-	print(posts_str)
+	blogger.debug(posts_str)
 	return page_name, posts_id, posts_str
 
 def get_page_name(page):
