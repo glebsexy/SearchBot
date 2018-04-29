@@ -15,7 +15,7 @@ import json
 import logging
 import logging.handlers
 
-from vk_info import token, version, service_token
+from vk_info import token, version, service_token, params_keyword, admin_users
 
 LOG_FILE = 'bot.log'
 LM_FILE, DB_FILE = "lm.json", "db.json"
@@ -36,6 +36,7 @@ Texts used to talk to the user
 Args:
 	q: query
 	g: group
+	p: parameter
 """
 text_hello = "Привет!"
 text_unclear = "Я не понимаю тебя. :c"
@@ -50,6 +51,15 @@ text_removed_query = "Больше не буду оповещать о новы�
 text_removed_group = "Больше не буду оповещать о новых записях в сообществе \"{g}\"."
 text_cant_find_group = "Не могу найти группу с таким адресом. о_О"
 text_you_are_welcome = "Пожалуйста!"
+text_param_changed = "Parameter changed successfully!"
+text_param_not_in_list = "Parameter \"{p}\" is not an avalilable parameter."
+text_param_failed = "Parameter change error."
+text_param_list = "List of current parameters:\n{p}"
+text_param_help = "Usage: <codeword> <parameter> <value>"
+
+PARAM_MSG = "message_check_frequency"
+PARAM_SRCH = "search_frequency"
+PARAM_LOGLVL = "logging_level"
 
 """  
 Data structure:
@@ -65,10 +75,13 @@ Data structure:
 
 """
 
+parameters = {PARAM_MSG: 3, PARAM_SRCH: 50, PARAM_LOGLVL: 10}
+
 def main():
 	counter = 0
 	while(True):
 		counter += 1
+		blogger.setLevel(parameters['logging_level'])
 
 		# Check messages and reply
 		all_messages = get_messages()
@@ -87,13 +100,13 @@ def main():
 			set_file_data(LM_FILE, get_last_message(messages))
 		
 		blogger.debug("Checked messages {} times.".format(counter))
-		if counter % 50 != 0:
-			time.sleep(3)
+		if counter % parameters[PARAM_SRCH] != 0:
+			time.sleep(parameters[PARAM_MSG])
 			continue
 
 		# Search
 		search_all()	
-		time.sleep(3)
+		time.sleep(PARAM_MSG)
 
 
 def get_messages():
@@ -127,6 +140,35 @@ def filter_new_messages(messages):
 			new_messages.append(message)
 	return new_messages
 
+def control_parameters(user, message):
+	""" Admin feature to change parameters of a script while it's running. """
+	sp = message.split(" ")
+	blogger.warning("User {} wants to change parameters: \"{}\"".format(user, message))
+	if len(sp) == 1:
+		send_message(user, text_param_list.format(p = parameters))
+		return True
+	try:
+		param = sp[1]
+		if param == "help":
+			send_message(user, text_param_help)
+			return True
+		value = sp[2]
+		if param in parameters:
+			try:
+				value = int(value)
+			except:
+				pass
+			if type(value) == type(parameters[param]):
+				parameters[param] = value
+				send_message(user, text_param_changed)
+			else:
+				raise ValueError("Wrong type of parameter!")
+		else:
+			send_message(user, text_param_not_in_list.format(p = param))
+	except:
+		send_message(user, text_param_failed)
+
+	return True
 
 def reply_to_message(user, message):
 	""" Given a message, find the best answer to it and act upon it
@@ -134,6 +176,10 @@ def reply_to_message(user, message):
 	Returns:
 		True if the reply was enough, False if it's necessary to wait for a user to reply. 
 	"""
+	# User sent a keyword to change or know parameters
+	if params_keyword == message.split(" ", 1)[0] and user in admin_users:
+		return control_parameters(user, message)
+
 	user = str(user)
 	new_user = add_user(user)
 	owner_id = None
