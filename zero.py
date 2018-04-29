@@ -3,6 +3,7 @@
 This bot searches for new posts on specified queries. Each user could have their own list of searches. Users could add and remove queries by talking to the bot.
 
 TODO:
+	* Add more inteligence with Regex or Wit.ai
 	* Russian and English translation
 	* Make the bot remember the context
 	
@@ -38,14 +39,17 @@ Args:
 """
 text_hello = "Привет!"
 text_unclear = "Я не понимаю тебя. :c"
-text_help = "Доступные команды:\n- Добавь <поисковый запрос> [в группе <URL группы>]\n- Удали <поискавый запрос> [для группы <URL группы>]\n- Отписаться (от всех поисков; можно заново \"подписаться\")"
+text_help = "Доступные команды:\n- Добавь <поисковый запрос> [в группе <URL группы>]\n- Удали <поискавый запрос> [для группы <URL группы>]\n- Удали <URL группы> (перестать искать все запросы в этой группе)"
 text_super = "Супер!"
 text_okay = "Окей!"
 text_added = "Буду оповещать, если новые результаты по запросу \"{q}\" будут появляться в сообществе \"{g}\"."
 text_wrong_data = "Что-то это не то."
 text_ask_group = "В какой группе искать? Скинь ссылку, пожалуйста."
 text_removed = "Больше не буду оповещать о новых записях с \"{q}\" в сообществе \"{g}\"."
+text_removed_query = "Больше не буду оповещать о новых записях по запросу \"{q}\"."
+text_removed_group = "Больше не буду оповещать о новых записях в сообществе \"{g}\"."
 text_cant_find_group = "Не могу найти группу с таким адресом. о_О"
+text_you_are_welcome = "Пожалуйста!"
 
 """  
 Data structure:
@@ -131,7 +135,7 @@ def reply_to_message(user, message):
 		True if the reply was enough, False if it's necessary to wait for a user to reply. 
 	"""
 	user = str(user)
-	add_user(user)
+	new_user = add_user(user)
 	owner_id = None
 	query, screen_name = extract_query(message)
 	if screen_name is not None:
@@ -143,46 +147,40 @@ def reply_to_message(user, message):
 			send_message(user, text_cant_find_group)
 			return True
 	
-	if "Удали" in message or "удали" in message:
+	while "Удали" in message or "удали" in message:
+		if "обавь" in message:
+			break
 		remove_query(user, query, owner_id)
 		if owner_id is not None and query is not None:
 			send_message(user, text_removed.format(q = query, g = group_name))
 			return True
 		elif owner_id is not None and query is None:
-			send_message(user, text_removed_group)
+			send_message(user, text_removed_group.format(g = group_name))
 			return True
 		elif owner_id is None and query is not None: 
-			send_message(user, text_removed_query)
+			send_message(user, text_removed_query.format(q = query))
 			return True
-		elif "обавь" in message:
-			pass
 		else:
 			send_message(user, text_unclear)
 			return True
+		break
 
 	if owner_id is not None and query is not None:
 		add_query(user, query, owner_id)
 		send_message(user, text_added.format(q = query, g = group_name))
 		return True
-	elif owner_id is not None and query is None:
-		send_message(user, text_ask_query)
-		return False
-	elif owner_id is None and query is not None: 
-		send_message(user, text_ask_group)
-		return False
 
-	if "ривет" in message:
+	if "ривет" in message or "Хай" in message or "хай" in message or "ку" in message or "Ку" in message or "дравствуй" in message:
 		send_message(user, text_hello)
+		if new_user:
+			send_message(user, text_help)
 		return True
 	if "омощь" in message or "оманды" in message:
 		send_message(user, text_help)
 		return True
-	if "тписаться" in message:
-		send_message(user, text_unsubscribed)
-		return True
-	if "одписаться" in message:
-		send_message(user, text_subscribed)
-		return True
+	if "асибо" in message or "лагодар" in message:
+		send_message(user, text_you_are_welcome)
+
 	# None of the filters matched
 	send_message(user, text_unclear)
 	return True
@@ -214,18 +212,27 @@ def extract_query(m):
 		words = m.split(" ")
 		if "vk.com/" in m:
 			g = m.split("vk.com/", 1)[1].split(" ")[0]
+		if g is None and " в группе " in m:
+			g = m.split(" в группе ", 1)[1].split(" ")[0]
+		elif g is None and " в " in m:
+			g = m.split(" в ", 1)[1].split(" ")[0]
 		if "\"" in m:
 			q = m.split("\"", 2)[1]
 			return q, g
 		if "обавь" in words[0] or "дали" in words[0]:
-			q = words[1]
+			if "vk.com/" not in words[1]:
+				q = words[1]
 	except Exception as e:
 		blogger.warning("Query extraction failed: {}".format(e))
 		pass
 	return q, g
 
 def add_user(u):
-	""" Adds a user to the database """
+	""" Adds a user to the database
+	
+	Returns:
+		If the user is new — True. False if they already were in the DB.
+	"""
 	db = get_file_data(DB_FILE)
 	# User ID is a number — convert it to string
 	u = str(u)
@@ -233,6 +240,8 @@ def add_user(u):
 		blogger.debug("Welcome new user! Adding...")
 		db[u] = {}
 		set_file_data(DB_FILE, db)
+		return True
+	return False
 
 def add_query(u, q = None, g = None):
 	""" Adds a query and a owner_id to the query of a specified user """
@@ -262,19 +271,31 @@ def add_query(u, q = None, g = None):
 
 def remove_query(u, q = None, g = None):
 	""" Removes query and owner_id from the list of the specified user """
+	blogger.debug("Removing user {} query {} on {}".format(u, q, g))
 	db = get_file_data(DB_FILE)
 	if u not in db:
 		blogger.debug("User not in DB tried to remove something.")
 		return
-	if q is None or q not in db[u]:
-		blogger.debug("No query to remove, trying to remove owner IDs.")
-		# Remove all appearences of a owner_id in all queries
-		if g is not None:
-			for query in db[u].keys():
-				if g in db[u][query]:
-					db[u][query].pop(g)
-	else:
-		db[u].pop(q, None)
+
+	# If only query is present then remove it
+	if q is not None and g is None:
+		popped = db[u].pop(q, None)
+		blogger.debug("Popped query: {}".format(popped))
+
+	# If both query and owner ID are present, remove owner ID in query
+	elif q is not None and g is not None:
+		g = str(g)
+		if q in db[u]:
+			popped = db[u][q].pop(g, None)
+			blogger.debug("Popped group {} from query: {}".format(g, popped))
+		
+	# Remove all appearences of a owner_id in all queries
+	elif g is not None:
+		g = str(g)
+		blogger.debug("No query to remove (q = {}), trying to remove owner IDs (id = {}).".format(q, g))
+		for query in db[u]:
+			popped = db[u][query].pop(g, None)
+			blogger.debug("Popped group {} from query {}.".format(popped, query))
 
 	set_file_data(DB_FILE, db)
 
